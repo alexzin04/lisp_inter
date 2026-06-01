@@ -5,7 +5,7 @@ mod parcer;
 mod profiler;
 
 use std::{
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -15,11 +15,18 @@ use crate::{
     function::{add_all_basic_func, eval},
 };
 
+struct RunOptions {
+    memoization_enabled: bool,
+    paths: Vec<PathBuf>,
+}
+
 fn main() {
-    let files = match lisp_files("test") {
+    let options = parse_args();
+
+    let files = match lisp_files("test", &options.paths) {
         Ok(files) => files,
         Err(err) => {
-            eprintln!("Не удалось открыть папку test: {err}");
+            eprintln!("Не удалось открыть примеры: {err}");
             return;
         }
     };
@@ -30,6 +37,14 @@ fn main() {
     }
 
     println!("Найдено примеров: {}", files.len());
+    println!(
+        "Memoization: {}",
+        if options.memoization_enabled {
+            "включена"
+        } else {
+            "выключена"
+        }
+    );
     println!();
 
     let suite_start = Instant::now();
@@ -37,7 +52,7 @@ fn main() {
     let mut failed = 0usize;
 
     for path in files {
-        if run_lisp_file(&path) {
+        if run_lisp_file(&path, options.memoization_enabled) {
             passed += 1;
         } else {
             failed += 1;
@@ -50,8 +65,54 @@ fn main() {
     println!("Общее время: {}", format_duration(suite_start.elapsed()));
 }
 
-fn lisp_files(dir: impl AsRef<Path>) -> std::io::Result<Vec<PathBuf>> {
+fn parse_args() -> RunOptions {
+    let mut memoization_enabled = true;
+    let mut paths = Vec::new();
+
+    for arg in env::args().skip(1) {
+        match arg.as_str() {
+            "--no-memo" | "--no-memoization" => memoization_enabled = false,
+            "--memo" | "--memoization" => memoization_enabled = true,
+            "--help" | "-h" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            _ => paths.push(PathBuf::from(arg)),
+        }
+    }
+
+    RunOptions {
+        memoization_enabled,
+        paths,
+    }
+}
+
+fn print_usage() {
+    println!("Usage:");
+    println!("  cargo run");
+    println!("  cargo run -- --no-memo");
+    println!("  cargo run -- --no-memo test/memoization.lisp");
+    println!();
+    println!("Flags:");
+    println!("  --no-memo, --no-memoization  Disable memoization for pure functions");
+    println!("  --memo, --memoization        Enable memoization explicitly");
+}
+
+fn lisp_files(dir: impl AsRef<Path>, requested_paths: &[PathBuf]) -> std::io::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
+
+    if !requested_paths.is_empty() {
+        for path in requested_paths {
+            if path.is_dir() {
+                files.extend(lisp_files(path, &[])?);
+            } else {
+                files.push(path.clone());
+            }
+        }
+
+        files.sort();
+        return Ok(files);
+    }
 
     for entry in fs::read_dir(dir)? {
         let path = entry?.path();
@@ -64,7 +125,7 @@ fn lisp_files(dir: impl AsRef<Path>) -> std::io::Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-fn run_lisp_file(path: &Path) -> bool {
+fn run_lisp_file(path: &Path, memoization_enabled: bool) -> bool {
     println!("=== {} ===", path.display());
 
     let load_start = Instant::now();
@@ -91,6 +152,7 @@ fn run_lisp_file(path: &Path) -> bool {
     let parse_time = parse_start.elapsed();
 
     let mut env = RuntimeEnv::new_global();
+    env.borrow_mut().memoization_enabled = memoization_enabled;
     add_all_basic_func(&mut env);
 
     let mut optimize_time = Duration::ZERO;

@@ -313,7 +313,10 @@ impl Parser {
 
         let quoted_expr = self.read_expr()?;
 
-        Ok(Value::cons(Value::symbol("quote"), quoted_expr))
+        Ok(Value::cons(
+            Value::symbol("quote"),
+            Value::cons(quoted_expr, Value::nil()),
+        ))
     }
 
     fn peek_token(&self) -> Option<Token> {

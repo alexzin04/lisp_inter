@@ -16,6 +16,18 @@ Run all examples with:
 cargo run
 ```
 
+Run without memoization:
+
+```sh
+cargo run -- --no-memo
+```
+
+Run one example without memoization:
+
+```sh
+cargo run -- --no-memo test/memoization.lisp
+```
+
 The runner reads every `.lisp` file in this directory, prints each expression
 result, shows rewritten expressions when optimization changes them, and prints
 parse/optimization/evaluation timings plus profiler counters.

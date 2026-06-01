@@ -7,8 +7,8 @@ use std::{
 use crate::{
     data::Value,
     enviroment::{PendingPureFunction, RuntimeEnv, StaticEnv},
-    function::{NativeFunction, eval},
-    parcer::{PurityState, compile_ast, is_expression_pure},
+    function::{eval, NativeFunction},
+    parcer::{compile_ast, is_expression_pure, PurityState},
 };
 
 fn memoized_body(body: Rc<Value>) -> Rc<Value> {
@@ -65,7 +65,14 @@ fn mark_function_as_pure(
     body: Rc<Value>,
     captured: Vec<Vec<Rc<Value>>>,
 ) {
-    install_function(env_rc, name, params_count, memoized_body(body), captured);
+    let memoization_enabled = env_rc.borrow().memoization_enabled;
+    let body = if memoization_enabled {
+        memoized_body(body)
+    } else {
+        body
+    };
+
+    install_function(env_rc, name, params_count, body, captured);
 
     let env = env_rc.borrow();
     env.pure_functions.borrow_mut().insert(name.to_string());

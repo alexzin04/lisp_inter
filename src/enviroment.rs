@@ -22,6 +22,7 @@ pub(crate) struct RuntimeEnv {
     pub pure_functions: RefCell<HashSet<String>>,
     pub pending_pure_functions: RefCell<HashMap<String, PendingPureFunction>>,
     pub profiler: RefCell<Profiler>,
+    pub memoization_enabled: bool,
 }
 
 impl RuntimeEnv {
@@ -32,6 +33,7 @@ impl RuntimeEnv {
             pure_functions: RefCell::new(HashSet::new()),
             pending_pure_functions: RefCell::new(HashMap::new()),
             profiler: RefCell::new(Profiler::new()),
+            memoization_enabled: true,
         }));
 
         {

@@ -8,6 +8,31 @@ use crate::{
 
 const MAX_CACHE_SIZE: usize = 100;
 
+struct PendingMemo {
+    memoized: Rc<Value>,
+    args: Vec<Rc<Value>>,
+}
+
+fn cache_memo_result(memoized: &Rc<Value>, args: Vec<Rc<Value>>, result: Rc<Value>) {
+    if let Value::Memoized { cache, .. } = memoized.as_ref() {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= MAX_CACHE_SIZE {
+            if let Some(key) = cache.keys().next().cloned() {
+                cache.remove(&key);
+            }
+        }
+        cache.insert(args, result);
+    }
+}
+
+fn finish_result(result: Rc<Value>, pending_memos: &mut Vec<PendingMemo>) -> Rc<Value> {
+    for pending in pending_memos.drain(..).rev() {
+        cache_memo_result(&pending.memoized, pending.args, result.clone());
+    }
+
+    result
+}
+
 pub(super) fn eval_function() -> Rc<Value> {
     Value::Function(NativeFunction::new(
         "eval",
@@ -26,35 +51,40 @@ pub(crate) fn eval(
     mut current_expr: Rc<Value>,
     env: &Rc<RefCell<RuntimeEnv>>,
 ) -> Result<Rc<Value>, String> {
+    let mut pending_memos = Vec::new();
+
     loop {
         let next_step = match current_expr.as_ref() {
             Value::Number(_) | Value::String(_) | Value::Bool(_) | Value::Nil => {
-                return Ok(current_expr);
+                return Ok(finish_result(current_expr, &mut pending_memos));
             }
 
             Value::LocalVar(depth, index) => {
-                return env.borrow().lookup_local(*depth, *index).ok_or_else(|| {
+                let value = env.borrow().lookup_local(*depth, *index).ok_or_else(|| {
                     format!(
                         "Runtime Error: Local var not found at d:{}, i:{}",
                         depth, index
                     )
-                });
+                })?;
+                return Ok(finish_result(value, &mut pending_memos));
             }
 
             Value::Symbol(sym) => {
-                return env
+                let value = env
                     .borrow()
                     .lookup_global(sym)
-                    .ok_or_else(|| format!("Undefined global symbol: {}", sym));
+                    .ok_or_else(|| format!("Undefined symbol: {}", sym))?;
+                return Ok(finish_result(value, &mut pending_memos));
             }
 
             Value::Lambda { params_count, body } => {
                 let captured = env.borrow().get_locals_clone();
-                return Ok(Rc::new(Value::Closure {
+                let value = Rc::new(Value::Closure {
                     params_count: *params_count,
                     body: Rc::clone(body),
                     captured,
-                }));
+                });
+                return Ok(finish_result(value, &mut pending_memos));
             }
 
             Value::TailCall { func, args } => {
@@ -87,7 +117,8 @@ pub(crate) fn eval(
                         Some((body.clone(), new_locals))
                     }
                     Value::Function(f) => {
-                        return f.call(&eval_args, env);
+                        let result = f.call(&eval_args, env)?;
+                        return Ok(finish_result(result, &mut pending_memos));
                     }
                     _ => return Err(format!("Object is not callable: {:?}", f_val)),
                 }
@@ -116,40 +147,34 @@ pub(crate) fn eval(
             }
 
             Value::Memoized { body, cache } => {
-                let args_key = env.borrow().get_current_frame_clone();
-
-                if let Some(hit) = cache.borrow().get(&args_key) {
-                    env.borrow().profiler.borrow_mut().memo_cache_hits += 1;
-                    return Ok(hit.clone());
+                if !env.borrow().memoization_enabled {
+                    current_expr = body.clone();
+                    continue;
                 }
-                env.borrow().profiler.borrow_mut().memo_cache_misses += 1;
 
                 let args = env.borrow().get_current_frame_clone();
 
-                {
-                    let cache_borrow = cache.borrow();
-                    if let Some(hit) = cache_borrow.get(&args) {
-                        return Ok(hit.clone());
-                    }
+                if let Some(hit) = cache.borrow().get(&args) {
+                    env.borrow().profiler.borrow_mut().memo_cache_hits += 1;
+                    return Ok(finish_result(hit.clone(), &mut pending_memos));
                 }
+                env.borrow().profiler.borrow_mut().memo_cache_misses += 1;
 
-                let result = eval(body.clone(), env)?;
-
-                {
-                    let mut cache = cache.borrow_mut();
-                    if cache.len() >= MAX_CACHE_SIZE {
-                        if let Some(key) = cache.keys().next().cloned() {
-                            cache.remove(&key);
-                        }
-                    }
-                    cache.insert(args, result.clone());
-                }
-
-                return Ok(result);
+                pending_memos.push(PendingMemo {
+                    memoized: current_expr.clone(),
+                    args,
+                });
+                current_expr = body.clone();
+                continue;
             }
 
-            Value::Pair(cons) => return eval_list(cons, env),
-            Value::Function(_) | Value::Closure { .. } => return Ok(current_expr),
+            Value::Pair(cons) => {
+                let result = eval_list(cons, env)?;
+                return Ok(finish_result(result, &mut pending_memos));
+            }
+            Value::Function(_) | Value::Closure { .. } => {
+                return Ok(finish_result(current_expr, &mut pending_memos));
+            }
             Value::Error(msg) => return Err(msg.clone()),
         };
 
@@ -184,13 +209,18 @@ fn eval_list(cons: &Cons, env: &Rc<RefCell<RuntimeEnv>>) -> Result<Rc<Value>, St
             }
         }
         if sym == "quote" {
+            let quoted_arg = match cons.cdr.as_ref() {
+                Value::Pair(arg_cons) => arg_cons.car.clone(),
+                _ => return Err("quote expects exactly 1 argument".to_string()),
+            };
+
             let define_fn = env
                 .borrow()
                 .lookup_global("quote")
                 .ok_or("Global 'quote' not found")?;
 
             if let Value::Function(f) = &*define_fn {
-                return f.call(&[cons.cdr.clone()], env);
+                return f.call(&[quoted_arg], env);
             }
         }
     }

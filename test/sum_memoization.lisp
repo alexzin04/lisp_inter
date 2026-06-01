@@ -1,6 +1,6 @@
-(define (sum-unique n)
+(define (sum-unique n acc)
   (if (< n 1)
-      0
-      (+ n (sum-unique (- n 1)))))
+      acc
+      (sum-unique (- n 1) (+ acc n))))
 
-(sum-unique 500)
+(sum-unique 50000 0)
