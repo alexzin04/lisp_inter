@@ -6,6 +6,8 @@ use crate::{
     function::NativeFunction,
 };
 
+const MAX_CACHE_SIZE: usize = 100;
+
 pub(super) fn eval_function() -> Rc<Value> {
     Value::Function(NativeFunction::new(
         "eval",
@@ -133,7 +135,15 @@ pub(crate) fn eval(
 
                 let result = eval(body.clone(), env)?;
 
-                cache.borrow_mut().insert(args, result.clone());
+                {
+                    let mut cache = cache.borrow_mut();
+                    if cache.len() >= MAX_CACHE_SIZE {
+                        if let Some(key) = cache.keys().next().cloned() {
+                            cache.remove(&key);
+                        }
+                    }
+                    cache.insert(args, result.clone());
+                }
 
                 return Ok(result);
             }
