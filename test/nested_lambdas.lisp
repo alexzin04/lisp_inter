@@ -1,0 +1,12 @@
+(define (calculate-deep x y)
+  ((lambda (z)
+     ((lambda (x)
+        ((lambda (w)
+           (if (> w z)
+               (+ x (* y w))
+               (- z x)))
+         (+ x z)))
+      (* y 2)))
+   (+ x y)))
+
+(calculate-deep 3 4)

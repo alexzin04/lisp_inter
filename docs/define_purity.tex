@@ -1,0 +1,90 @@
+\section*{Приложение А. Анализ чистоты функции}
+\addcontentsline{toc}{section}{Приложение А. Анализ чистоты функции}
+
+\begin{minted}[
+    linenos,
+    breaklines,
+    fontsize=\footnotesize,
+    frame=lines
+]{rust}
+fn dfs_postorder(
+    node: &str,
+    graph: &HashMap<String, Vec<String>>,
+    visited: &mut HashSet<String>,
+    order: &mut Vec<String>,
+) {
+    if !visited.insert(node.to_string()) {
+        return;
+    }
+
+    if let Some(neighbors) = graph.get(node) {
+        for neighbor in neighbors {
+            dfs_postorder(neighbor, graph, visited, order);
+        }
+    }
+
+    order.push(node.to_string());
+}
+
+fn transpose_graph(graph: &HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {
+    let mut reversed = graph
+        .keys()
+        .cloned()
+        .map(|name| (name, Vec::new()))
+        .collect::<HashMap<_, _>>();
+
+    for (node, neighbors) in graph {
+        for neighbor in neighbors {
+            reversed
+                .entry(neighbor.clone())
+                .or_default()
+                .push(node.clone());
+        }
+    }
+
+    reversed
+}
+
+fn dfs_collect_component(
+    node: &str,
+    graph: &HashMap<String, Vec<String>>,
+    visited: &mut HashSet<String>,
+    component: &mut Vec<String>,
+) {
+    if !visited.insert(node.to_string()) {
+        return;
+    }
+
+    component.push(node.to_string());
+    if let Some(neighbors) = graph.get(node) {
+        for neighbor in neighbors {
+            dfs_collect_component(neighbor, graph, visited, component);
+        }
+    }
+}
+
+fn strongly_connected_components(graph: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
+    let mut visited = HashSet::new();
+    let mut order = Vec::new();
+
+    for node in graph.keys() {
+        dfs_postorder(node, graph, &mut visited, &mut order);
+    }
+
+    let reversed = transpose_graph(graph);
+    let mut visited = HashSet::new();
+    let mut components = Vec::new();
+
+    while let Some(node) = order.pop() {
+        if visited.contains(&node) {
+            continue;
+        }
+
+        let mut component = Vec::new();
+        dfs_collect_component(&node, &reversed, &mut visited, &mut component);
+        components.push(component);
+    }
+
+    components
+}
+\end{minted}
